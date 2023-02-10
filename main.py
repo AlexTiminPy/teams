@@ -9,6 +9,7 @@ import pickle
 import warnings
 
 from collections import namedtuple
+# from numba import njit
 
 warnings.filterwarnings(action='ignore', category=UserWarning)
 
@@ -93,13 +94,13 @@ class Line:
 class Patron:
     patrons = []
 
-    def __init__(self, father, x: float, y: float, dx: float, dy: float, gun_damage: int,
+    def __init__(self, x: float, y: float, dx: float, dy: float, gun_damage: int,
                  fly_distance: float = 500, radius: int = 1, speed: int = 20, color: Color = Color.BLACK
                  ):
         self.x = x
         self.y = y
-        self.dx = dx  # + round(random.uniform(-0.1, 0.1), 3)
-        self.dy = dy  # + round(random.uniform(-0.1, 0.1), 3)
+        self.dx = dx
+        self.dy = dy
 
         self.gun_damage = gun_damage
         self.fly_distance = fly_distance
@@ -109,12 +110,9 @@ class Patron:
         self.radius = radius
         self.color = color
 
-        self.father = father
-
         Patron.patrons.append(self)
 
     def get_data_for_draw(self):
-        # return Line(self.x, self.y, self.x + (self.dx * self.speed), self.y + (self.dy * self.speed))
         return Circle(self.color, self.x, self.y, self.radius)
 
     def calculate_replace_position(self):
@@ -220,8 +218,7 @@ class Warrior:
 
         if self.gun.actual_patron_count > 0:
             self.gun.actual_patron_count -= 1
-            Patron(father=self,
-                   x=self.external.x + math.cos(math.radians(self.fight.actual_angle)) * self.external.radius,
+            Patron(x=self.external.x + math.cos(math.radians(self.fight.actual_angle)) * self.external.radius,
                    y=self.external.y + math.sin(math.radians(self.fight.actual_angle)) * self.external.radius,
                    dx=math.cos(math.radians(self.fight.actual_angle)),
                    dy=math.sin(math.radians(self.fight.actual_angle)),
@@ -375,11 +372,12 @@ class Collision:
         else:
             return False
 
+
     @staticmethod
     def collision_segment_and_circle(x, y, radius,
                                      x1, y1,
                                      x2, y2):
-        if abs(math.hypot(abs(x - x1), abs(y - y1))) < abs(math.hypot(abs(x2 - x1), abs(y2 - y1))):
+        if abs(math.hypot(x - x1, y - y1)) > abs(math.hypot(x2 - x1, y2 - y1)):
             return False
 
         try:
@@ -426,11 +424,10 @@ for i in range(5):
             internal=InternalPartWarrior(),
             fight=FightPartWarrior())
 
-GLOBAL_TICK = 0
-GLOBAL_STEP = 3600
+spawn_count = 1
 
 while True:
-    pygame.display.set_caption(f"{CLOCK.get_fps()}")
+    pygame.display.set_caption(f"{spawn_count}, {CLOCK.get_fps()}")
 
     win.fill(Color.WHITE)
 
@@ -446,22 +443,30 @@ while True:
         if event.type == pygame.MOUSEBUTTONDOWN:
 
             if event.button == 1:
-                for i in range(3):
-                    for t in range(3):
+                for i in range(spawn_count):
+                    for t in range(spawn_count):
                         Warrior(gun=Gun(),
                                 team=team1,
-                                external=ExternalPartWarrior(x=mouse[0] + 25 * i, y=mouse[1] + 25 * t, color=team1.color),
+                                external=ExternalPartWarrior(x=mouse[0] + (25 * i - ((spawn_count - 1) * 25 / 2)),
+                                                             y=mouse[1] + (25 * t - ((spawn_count - 1) * 25 / 2)), color=team1.color),
                                 internal=InternalPartWarrior(),
                                 fight=FightPartWarrior())
 
             if event.button == 3:
-                for i in range(3):
-                    for t in range(3):
+                for i in range(spawn_count):
+                    for t in range(spawn_count):
                         Warrior(gun=Gun(),
                                 team=team2,
-                                external=ExternalPartWarrior(x=mouse[0] + 25 * i, y=mouse[1] + 25 * t, color=team2.color),
+                                external=ExternalPartWarrior(x=mouse[0] + (25 * i - ((spawn_count - 1) * 25 / 2)),
+                                                             y=mouse[1] + (25 * t - ((spawn_count - 1) * 25 / 2)), color=team2.color),
                                 internal=InternalPartWarrior(),
                                 fight=FightPartWarrior())
+
+            if event.button == 4:
+                spawn_count += 1
+
+            if event.button == 5:
+                spawn_count -= 1
 
     for warrior in Warrior.warriors:
         warrior.__tick__()
