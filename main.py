@@ -8,19 +8,24 @@ import pickle
 
 import warnings
 
+from collections import namedtuple
+
 warnings.filterwarnings(action='ignore', category=UserWarning)
 
 pygame.init()
-my_font = pygame.font.SysFont('Comic Sans MS', 15)
 
-with open('modelsSave/rotate_model.pkl', 'rb') as f:
-    clf_rotate = pickle.load(f)
 
-with open('modelsSave/move_model.pkl', 'rb') as f:
-    clf_move = pickle.load(f)
+def get_models():
+    with open('modelsSave/rotate_model.pkl', 'rb') as f:
+        clf_rotate = pickle.load(f)
 
-with open('modelsSave/reload_pass_fire_model.pkl', 'rb') as f:
-    clf_reload_pass_fire = pickle.load(f)
+    with open('modelsSave/move_model.pkl', 'rb') as f:
+        clf_move = pickle.load(f)
+
+    with open('modelsSave/reload_pass_fire_model.pkl', 'rb') as f:
+        clf_reload_pass_fire = pickle.load(f)
+
+    return clf_rotate, clf_move, clf_reload_pass_fire
 
 
 class Color:
@@ -85,21 +90,6 @@ class Line:
         pygame.draw.line(win, Color.BLACK, [self.x1, self.y1], [self.x2, self.y2], 1)
 
 
-WIDTH, HEIGHT = 1800, 900
-win = pygame.display.set_mode((WIDTH, HEIGHT))
-CLOCK = pygame.time.Clock()
-fps = 120
-is_true = True
-
-
-def sigmoid(x):
-    return 1 / (1 + numpy.exp(-x))
-
-
-def tangoid(x):
-    return (numpy.exp(x) - numpy.exp(-x)) / (numpy.exp(x) + numpy.exp(-x))
-
-
 class Patron:
     patrons = []
 
@@ -134,7 +124,7 @@ class Patron:
 
 
 class Gun:
-    def __init__(self, patron_count: int = 15, fire_speed: float = 360, patron_speed: int = 10,
+    def __init__(self, patron_count: int = 15, fire_speed: float = 360, patron_speed: int = 20,
                  spread: float = 4, fire_distance: float = 500, damage: int = 5):
         self.max_patron_count = patron_count
         self.actual_patron_count = patron_count
@@ -148,34 +138,9 @@ class Gun:
         self.actual_cooldown = fire_speed
         self.is_reloaded = True
 
-    def reload(self):
-        if self.actual_cooldown == self.cooldown:
-            self.actual_patron_count = 0
-            self.actual_cooldown = 0
-            self.is_reloaded = False
 
-    def __tick__(self):
-        if self.actual_cooldown < self.cooldown:
-            self.actual_cooldown += 1
-        elif self.actual_cooldown >= self.cooldown and not self.is_reloaded:
-            self.actual_patron_count = self.max_patron_count
-            self.is_reloaded = True
-
-
-class Warrior:
-    def __init__(self, gun: Gun, n1=None, n2=None, n3=None, team=None,
-                 patrons_count: int = 500, heals: int = 10, speed: float = 0.5, rotation_speed: float = 1,
-                 x: float = 0, y: float = 0, radius: int = 3, color: Color = Color.random_color(),
-                 watch_angle: float = 90, watch_distance: int = 500, actual_angle: float = 0, last_score=0):
-        self.gun = gun
-
-        self.max_patrons_count = patrons_count
-        self.actual_patrons_count = patrons_count
-        self.max_heals = heals
-        self.actual_heals = heals
-        self.speed = speed
-        self.rotation_speed = rotation_speed
-
+class ExternalPartWarrior:
+    def __init__(self, x: float = 0, y: float = 0, radius: int = 3, color: Color = Color.random_color()):
         self.x = x
         self.y = y
         self.dx = 0
@@ -183,46 +148,100 @@ class Warrior:
         self.radius = radius
         self.color = color
 
+    def get_data_for_draw(self):
+        return [Circle(self.color, self.x, self.y, self.radius)]
+
+
+class InternalPartWarrior:
+    def __init__(self):
+        self.rotate_model = DecisionMakingWarriors.mutate(clf_rotate)
+        self.move_model = DecisionMakingWarriors.mutate(clf_move)
+        self.reload_pass_fire_model = DecisionMakingWarriors.mutate(clf_reload_pass_fire)
+
+
+class FightPartWarrior:
+    def __init__(self, patrons_count: int = 500, heals: int = 1, speed: float = 0.5, rotation_speed: float = 1,
+                 watch_angle: float = 90, watch_distance: int = 500):
+        self.max_patrons_count = patrons_count
+        self.actual_patrons_count = patrons_count
+        self.max_heals = heals
+        self.actual_heals = heals
+        self.speed = speed
+        self.rotation_speed = rotation_speed
+
         self.watch_angle = watch_angle
         self.watch_distance = watch_distance
         self.actual_angle = random.randint(0, 360)
 
-        self.score = 0
+
+class Team:
+    def __init__(self, name, color):
+        self.name = name
+        self.color = color
+
+
+class Warrior:
+    warriors = []
+
+    def __init__(self, gun: Gun, team: Team, external: ExternalPartWarrior, internal: InternalPartWarrior, fight: FightPartWarrior):
+        self.gun = gun
+
         self.team = team
 
-        self.rotate_model = self.mutate(clf_rotate)
-        self.move_model = self.mutate(clf_move)
-        self.reload_pass_fire_model = self.mutate(clf_reload_pass_fire)
+        self.external = external
+        self.internal = internal
+        self.fight = fight
 
-        # deform = abs((last_score - 50000) / 250000)
-        #
-        # if n1 is None:
-        #     self.neurons_1 = [[random.uniform(-0.0001, 0.0001) for _ in range(10)] for _ in range(8)]
-        # else:
-        #     self.neurons_1 = n1
-        #     for i in range(len(self.neurons_1)):
-        #         for t in range(len(self.neurons_1[i])):
-        #             self.neurons_1[i][t] += random.uniform(-deform, deform)
-        #
-        # if n2 is None:
-        #     self.neurons_2 = [[random.uniform(-0.0001, 0.0001) for _ in range(8)] for _ in range(10)]
-        #
-        # else:
-        #     self.neurons_2 = n2
-        #     for i in range(len(self.neurons_2)):
-        #         for t in range(len(self.neurons_2[i])):
-        #             self.neurons_2[i][t] += random.uniform(-deform, deform)
-        #
-        # if n3 is None:
-        #     self.neurons_3 = [[random.uniform(-0.0001, 0.0001) for _ in range(3)] for _ in range(8)]
-        #
-        # else:
-        #     self.neurons_3 = n3
-        #     for i in range(len(self.neurons_2)):
-        #         for t in range(len(self.neurons_2[i])):
-        #             self.neurons_2[i][t] += random.uniform(-deform, deform)
+        Warrior.warriors.append(self)
 
-    def mutate(self, model):
+    def __tick__(self):
+        if self.gun.actual_cooldown < self.gun.cooldown:
+            self.gun.actual_cooldown += 1
+        elif self.gun.actual_cooldown >= self.gun.cooldown and not self.gun.is_reloaded:
+            self.actual_patron_count = self.gun.max_patron_count
+            self.is_reloaded = True
+
+    def get_data_for_draw(self):
+
+        return self.external.get_data_for_draw()
+
+    def rotate(self, percent):
+        self.fight.actual_angle += self.fight.rotation_speed * percent
+
+    def went(self, percent_forward):
+        dx = math.cos(math.radians(self.fight.actual_angle)) * (self.fight.speed * percent_forward)
+        dy = math.sin(math.radians(self.fight.actual_angle)) * (self.fight.speed * percent_forward)
+        if 0 < self.external.x + dx < WIDTH:
+            self.external.x += dx
+        if 0 < self.external.y + dy < HEIGHT:
+            self.external.y += dy
+
+    def fire(self):
+
+        if self.gun.actual_patron_count > 0:
+            self.gun.actual_patron_count -= 1
+            Patron(father=self,
+                   x=self.external.x + math.cos(math.radians(self.fight.actual_angle)) * self.external.radius,
+                   y=self.external.y + math.sin(math.radians(self.fight.actual_angle)) * self.external.radius,
+                   dx=math.cos(math.radians(self.fight.actual_angle)),
+                   dy=math.sin(math.radians(self.fight.actual_angle)),
+                   gun_damage=self.gun.damage)
+
+    def reload(self):
+        if self.fight.actual_patrons_count < 0:
+            return
+
+        self.fight.actual_patrons_count -= min(self.gun.max_patron_count, self.fight.actual_patrons_count)
+
+        if self.gun.actual_cooldown == self.gun.cooldown:
+            self.gun.actual_patron_count = 0
+            self.gun.actual_cooldown = 0
+            self.gun.is_reloaded = False
+
+
+class DecisionMakingWarriors:
+    @staticmethod
+    def mutate(model):
         new_model = copy.deepcopy(model)
         for cf in new_model.coefs_:
             for i in range(len(cf)):
@@ -231,181 +250,116 @@ class Warrior:
 
         return new_model
 
-    def __repr__(self):
-        return f"{self.score}"
+    @staticmethod
+    def calculate_neural_network(warrior, all_possibles_enemy):
 
-    def __tick__(self):
-        self.gun.__tick__()
+        start_data = DecisionMakingWarriors.get_start_data(warrior, all_possibles_enemy)
+        rotate, move, reload_pass_fire = DecisionMakingWarriors.get_predicts(warrior, start_data)
+        DecisionMakingWarriors.activate(warrior, rotate, move, reload_pass_fire)
 
-    def get_data_for_draw(self):
-        # actual_angle = self.actual_angle
-        # if actual_angle < 0:
-        #     actual_angle += 360
-        # if self.actual_heals <= 0:
-        #     return [Circle((
-        #         self.color[0] * (self.gun.actual_patron_count / self.gun.max_patron_count),
-        #         self.color[1] * (self.gun.actual_patron_count / self.gun.max_patron_count),
-        #         self.color[2] * (self.gun.actual_patron_count / self.gun.max_patron_count)),
-        #         self.x, self.y, self.radius)]
-        # else:
-        # return [Circle(self.color, self.x, self.y, self.radius),
-        #         Sector((actual_angle - 45), (actual_angle + 45),
-        #                self.x - self.watch_distance, self.y - self.watch_distance,
-        #                self.watch_distance * 2, self.watch_distance * 2)]
+    @staticmethod
+    def get_start_data(warrior, all_possibles_enemy):
+        look_at_friend = 0
+        look_at_enemy = 0
 
-        # text_surface = my_font.render(f"{self.gun.actual_patron_count}/{self.gun.max_patron_count}   "
-        #                               f"{self.actual_patrons_count}/{self.max_patrons_count}", False, (0, 0, 0))
-        # win.blit(text_surface, (self.x + 20, self.y))
+        enemy_on_left = 0
+        enemy_on_right = 0
 
-        return [Circle(self.color, self.x, self.y, self.radius),
-                # Line(self.x, self.y,
-                #      self.x + math.cos(math.radians(self.actual_angle)) * self.watch_distance,
-                #      self.y + math.sin(math.radians(self.actual_angle)) * self.watch_distance)
-                ]
+        min_distance = 100000
 
-    def rotate(self, percent):
-        self.actual_angle += self.rotation_speed * percent
+        for enemy in all_possibles_enemy:
 
-    def went(self, percent_forward, percent_sideward):
-        dx = math.cos(math.radians(self.actual_angle)) * (self.speed * percent_forward)
-        dy = math.sin(math.radians(self.actual_angle)) * (self.speed * percent_forward)
-        if 0 < self.x + dx < WIDTH:
-            self.x += dx
-        if 0 < self.y + dy < HEIGHT:
-            self.y += dy
+            if enemy is warrior:
+                continue
 
-        dx = math.cos(math.radians(self.actual_angle + 90)) * (self.speed * percent_sideward)
-        dy = math.sin(math.radians(self.actual_angle + 90)) * (self.speed * percent_sideward)
-        if 0 < self.x + dx < WIDTH:
-            self.x += dx
-        if 0 < self.y + dy < HEIGHT:
-            self.y += dy
+            distance = abs(math.hypot(enemy.external.x - warrior.external.x, enemy.external.y - warrior.external.y))
 
-    def fire(self):
+            if distance > warrior.fight.watch_distance:
+                continue
 
-        if self.gun.actual_patron_count > 0:
-            self.gun.actual_patron_count -= 1
-            Patron(father=self,
-                   x=self.x + math.cos(math.radians(self.actual_angle)) * self.radius,
-                   y=self.y + math.sin(math.radians(self.actual_angle)) * self.radius,
-                   dx=math.cos(math.radians(self.actual_angle)),
-                   dy=math.sin(math.radians(self.actual_angle)),
-                   gun_damage=self.gun.damage)
+            min_distance = min(min_distance, distance)
 
-    def reload(self):
-        if self.actual_patrons_count > 0:
-            self.actual_patrons_count -= min(self.gun.max_patron_count, self.actual_patrons_count)
-            self.gun.reload()
+            enemy_on_left, enemy_on_right = DecisionMakingWarriors.get_left_right_enemy(warrior, enemy, enemy_on_left, enemy_on_right)
 
+            look_at_enemy, look_at_friend = DecisionMakingWarriors.get_is_look_on(warrior, enemy)
 
-class Team:
-    def __init__(self, color, warriors: []):
-        self.color = color
-        self.warriors = warriors
+        if not look_at_friend and not look_at_enemy:
+            min_distance = 0
 
-        self.count = 0
-
-        for warrior in self.warriors:
-            warrior.color = self.color
-
-    def __tick__(self):
-        for warrior in self.warriors:
-            warrior.__tick__()
-
-    def get_data_for_draw(self):
-        return [i.get_data_for_draw() for i in self.warriors]
-
-    def calculate_neural_network(self, all_possibles_enemy):
-
-        for warrior in self.warriors:
-
-            look_at_enemy = 0
-            look_at_friend = 0
-
-            enemy_on_left = 0
-            enemy_on_right = 0
-
-            min_distance = 100000
-
-            for enemy in all_possibles_enemy:
-
-                if enemy is warrior:
-                    continue
-
-                distance = math.hypot(enemy.x - warrior.x, enemy.y - warrior.y)
-                if distance > warrior.watch_distance:
-                    continue
-
-                angle = math.degrees(math.atan2(enemy.y - warrior.y, enemy.x - warrior.x))
-                if angle < 0:
-                    angle += 360
-
-                act_angle = warrior.actual_angle
-                if act_angle < 0:
-                    act_angle += 360
-
-                if Collision.collision_segment_and_circle(
-                        enemy.x, enemy.y, enemy.radius,
-                        warrior.x, warrior.y,
-                        warrior.x + math.cos(math.radians(warrior.actual_angle)) * warrior.watch_distance,
-                        warrior.y + math.sin(math.radians(warrior.actual_angle)) * warrior.watch_distance):
-
-                    # pygame.draw.circle(win, Color.GRAY, [enemy.x, enemy.y], enemy.radius * 2, 3)
-
-                    if abs(distance) < min_distance and abs(distance) < warrior.watch_distance:
-                        min_distance = abs(distance)
-
-                        if act_angle > angle > act_angle - 45 and enemy.team is not warrior.team:
-                            enemy_on_left = 1
-
-                        if act_angle + 45 > angle > act_angle and enemy.team is not warrior.team:
-                            enemy_on_right = 1
-
-                        if enemy.team is warrior.team:
-                            look_at_friend = 1
-                            look_at_enemy = 0
-
-                        else:
-                            look_at_enemy = 1
-                            look_at_friend = 0
-
-            if not look_at_friend and not look_at_enemy:
-                min_distance = 0
-
-            start_data = [[
-                warrior.actual_heals / warrior.max_heals,
-                warrior.gun.actual_patron_count / warrior.gun.max_patron_count,
-                warrior.actual_patrons_count / warrior.max_patrons_count,
-                (min_distance / warrior.watch_distance),
+        return [
+            DecisionMakingWarriors.get_easy_data(warrior, min_distance) +
+            [
                 look_at_enemy,
                 look_at_friend,
-                enemy_on_left,
-                enemy_on_right
+                int(bool(enemy_on_left)),
+                int(bool(enemy_on_right))
             ]]
 
-            rotate = warrior.rotate_model.predict(start_data)
+    @staticmethod
+    def get_is_look_on(warrior, enemy):
+        look_at_enemy = 0
+        look_at_friend = 0
 
-            if rotate < 0:
-                warrior.rotate(-1)
-            elif rotate > 0:
-                warrior.rotate(1)
+        if not Collision.collision_segment_and_circle(
+                enemy.external.x, enemy.external.y, enemy.external.radius,
+                warrior.external.x, warrior.external.y,
+                warrior.external.x + math.cos(math.radians(warrior.fight.actual_angle)) * warrior.fight.watch_distance,
+                warrior.external.y + math.sin(math.radians(warrior.fight.actual_angle)) * warrior.fight.watch_distance):
+            return look_at_enemy, look_at_friend
 
-            move = warrior.move_model.predict(start_data)
-            if move < 0:
-                warrior.went(-1, 0)
-            elif move > 0:
-                warrior.went(1, 0)
+        if enemy.team is warrior.team:
+            look_at_friend = 1
+            look_at_enemy = 0
+            return look_at_enemy, look_at_friend
 
-            reload_pass_fire = warrior.reload_pass_fire_model.predict(start_data)
+        look_at_enemy = 1
+        look_at_friend = 0
 
-            if reload_pass_fire < 0:
-                warrior.reload()
-            elif reload_pass_fire > 0:
-                warrior.fire()
+        return look_at_enemy, look_at_friend
 
-            # print(start_data)
-            # print(rotate, move, reload_pass_fire)
-            # print("---------------")
+    @staticmethod
+    def get_easy_data(warrior, min_distance):
+        return [warrior.fight.actual_heals / warrior.fight.max_heals,
+                warrior.gun.actual_patron_count / warrior.gun.max_patron_count,
+                warrior.fight.actual_patrons_count / warrior.fight.max_patrons_count,
+                (min_distance / warrior.fight.watch_distance)]
+
+    @staticmethod
+    def get_left_right_enemy(warrior, enemy, last_enemy_on_left, last_enemy_on_right):
+        enemy_on_left = last_enemy_on_left
+        enemy_on_right = last_enemy_on_right
+        angle = math.degrees(math.atan2(enemy.external.y - warrior.external.y, enemy.external.x - warrior.external.x))
+        angle = max(angle, angle + 360)
+
+        act_angle = max(warrior.fight.actual_angle, warrior.fight.actual_angle + 360)
+
+        if act_angle > angle > act_angle - 45:
+            enemy_on_left += 1
+
+        elif act_angle + 45 > angle > act_angle:
+            enemy_on_right += 1
+
+        return enemy_on_left, enemy_on_right
+
+    @staticmethod
+    def activate(warrior, rotate, move, reload_pass_fire):
+
+        warrior.rotate(rotate[0])
+
+        warrior.went(move[0])
+
+        if reload_pass_fire < 0:
+            warrior.reload()
+        elif reload_pass_fire > 0:
+            warrior.fire()
+
+    @staticmethod
+    def get_predicts(warrior, start_data):
+        rotate = warrior.internal.rotate_model.predict(start_data)
+        move = warrior.internal.move_model.predict(start_data)
+        reload_pass_fire = warrior.internal.reload_pass_fire_model.predict(start_data)
+
+        return rotate, move, reload_pass_fire
 
 
 class Collision:
@@ -417,31 +371,22 @@ class Collision:
         v3 = (ax2 - ax1) * (by1 - ay1) - (ay2 - ay1) * (bx1 - ax1)
         v4 = (ax2 - ax1) * (by2 - ay1) - (ay2 - ay1) * (bx2 - ax1)
         if (v1 * v2 < 0) and (v3 * v4 < 0):
-            return True  # пересекаются
+            return True
         else:
-            return False  # не пересекаются
+            return False
 
     @staticmethod
     def collision_segment_and_circle(x, y, radius,
                                      x1, y1,
                                      x2, y2):
-        zn1 = x2 - x1
-        zn2 = y2 - y1
-        chs1 = zn2 * (-x1)
-        chs2 = zn1 * (-y1)
-        A = zn2
-        B = -zn1
-        C = chs1 - chs2
+        if abs(math.hypot(abs(x - x1), abs(y - y1))) < abs(math.hypot(abs(x2 - x1), abs(y2 - y1))):
+            return False
 
-        A1 = B
-        B1 = -A
-        C1 = B * (-x) - A * (-y)
-
-        M1 = numpy.array([[A, B],
-                          [A1, B1]])  # Матрица (левая часть системы)
-        v1 = numpy.array([-C, -C1])  # Вектор (правая часть системы)
         try:
-            point = numpy.linalg.solve(M1, v1)
+            point = numpy.linalg.solve(numpy.array([[y2 - y1, x1 - x2],
+                                                    [x1 - x2, y1 - y2]]),
+                                       numpy.array([(x2 - x1) * -y1 - (y2 - y1) * -x1,
+                                                    (y2 - y1) * -y - (x2 - x1) * x]))
         except numpy.linalg.LinAlgError:
             return False
 
@@ -450,29 +395,36 @@ class Collision:
         if max(x1, x2) >= point[0] >= min(x1, x2) and \
                 max(y1, y2) >= point[1] >= min(y1, y2):
 
-            if distance < radius:
-                return True
-            elif distance == radius:
-                return True
-            elif distance > radius:
-                return False  # возвращаю колво точек, если не надо поправь на да/нет
+            return distance <= radius
 
         else:
             return False
 
 
-team_list = [Team(Color.RED, warriors=[]),
-             Team(Color.BLUE, warriors=[])]
+WIDTH, HEIGHT = 1800, 900
+win = pygame.display.set_mode((WIDTH, HEIGHT))
+CLOCK = pygame.time.Clock()
+fps = 120
+is_true = True
 
-team_list[0].warriors = \
-    [Warrior(team=team_list[0], gun=Gun(patron_speed=5), x=100 * i + 100, y=400, radius=5, color=team_list[0].color)
-     for i in range(5)]
+my_font = pygame.font.SysFont('Comic Sans MS', 15)
 
-team_list[1].warriors = \
-    [Warrior(team=team_list[1], gun=Gun(patron_speed=5), x=100 * i + 100, y=500, radius=5, color=team_list[1].color)
-     for i in range(5)]
+clf_rotate, clf_move, clf_reload_pass_fire = get_models()
 
-# user_warrior = Warrior(gun=Gun(patron_speed=20), x=450, y=225, radius=15, color=Color.GREEN)
+team1 = Team("Goffy", Color.RED)
+team2 = Team("Micky", Color.BLUE)
+
+for i in range(5):
+    Warrior(gun=Gun(),
+            team=team1,
+            external=ExternalPartWarrior(x=100 * i + 100, y=400, color=team1.color),
+            internal=InternalPartWarrior(),
+            fight=FightPartWarrior())
+    Warrior(gun=Gun(),
+            team=team2,
+            external=ExternalPartWarrior(x=100 * i + 100, y=500, color=team2.color),
+            internal=InternalPartWarrior(),
+            fight=FightPartWarrior())
 
 GLOBAL_TICK = 0
 GLOBAL_STEP = 3600
@@ -491,96 +443,63 @@ while True:
         if event.type == pygame.QUIT:
             sys.exit()
 
-        if event.type == pygame.KEYDOWN:
-
-            if event.key == pygame.K_1:
-                t = Warrior(gun=Gun(patron_speed=5), x=mouse[0], y=mouse[1], radius=10)
-                t.color = team_list[0].color
-                team_list[0].warriors.append(t)
-
-            if event.key == pygame.K_2:
-                t = Warrior(gun=Gun(patron_speed=5), x=mouse[0], y=mouse[1], radius=10)
-                t.color = team_list[1].color
-                team_list[1].warriors.append(t)
-
-            if event.key == pygame.K_SPACE:
-                GLOBAL_TICK = GLOBAL_STEP
-
         if event.type == pygame.MOUSEBUTTONDOWN:
-            # user_warrior.fire()
-            # user_warrior.reload()
+
             if event.button == 1:
                 for i in range(3):
-                    team_list[0].warriors += \
-                        [Warrior(team=team_list[0],
-                                 gun=Gun(patron_speed=5),
-                                 x=15 * i + mouse[0], y=15 * t + mouse[1], color=team_list[0].color)
-                         for t in range(3)]
+                    for t in range(3):
+                        Warrior(gun=Gun(),
+                                team=team1,
+                                external=ExternalPartWarrior(x=mouse[0] + 25 * i, y=mouse[1] + 25 * t, color=team1.color),
+                                internal=InternalPartWarrior(),
+                                fight=FightPartWarrior())
 
             if event.button == 3:
                 for i in range(3):
-                    team_list[1].warriors += \
-                        [Warrior(team=team_list[1],
-                                 gun=Gun(patron_speed=5),
-                                 x=15 * i + mouse[0], y=15 * t + mouse[1], color=team_list[1].color)
-                         for t in range(3)]
+                    for t in range(3):
+                        Warrior(gun=Gun(),
+                                team=team2,
+                                external=ExternalPartWarrior(x=mouse[0] + 25 * i, y=mouse[1] + 25 * t, color=team2.color),
+                                internal=InternalPartWarrior(),
+                                fight=FightPartWarrior())
 
+    for warrior in Warrior.warriors:
+        warrior.__tick__()
 
-    for team in team_list:
-        team.__tick__()
-        new_team_list = []
-        for team_enemy in team_list:
-            new_team_list += team_enemy.warriors
-        team.calculate_neural_network(new_team_list)
+        DecisionMakingWarriors.calculate_neural_network(warrior, Warrior.warriors)
 
-        for drawable in team.get_data_for_draw():
-            if isinstance(drawable, list):
-                for deep_drawable in drawable:
-                    deep_drawable.draw()
-            else:
-                drawable.draw()
-
-    all_possibles_enemy = []
-    for team_enemy in team_list:
-        all_possibles_enemy += team_enemy.warriors
+        for drawable in warrior.get_data_for_draw():
+            drawable.draw()
 
     i = 0
 
     while len(Patron.patrons) - 1 > i:
         patron = Patron.patrons[i]
 
-        for team in team_list:
-            for warrior in team.warriors:
+        for warrior in Warrior.warriors:
 
-                if Collision.collision_segment_and_circle(warrior.x, warrior.y, warrior.radius,
+            if not Collision.collision_segment_and_circle(warrior.external.x, warrior.external.y, warrior.external.radius,
                                                           patron.x, patron.y,
                                                           patron.x + patron.dx * patron.speed,
                                                           patron.y + patron.dy * patron.speed):
+                continue
 
-                    if warrior.actual_heals <= 0:
-                        try:
-                            team.warriors.remove(warrior)
-                        except:
-                            pass
-                        continue
+            try:
+                Patron.patrons.remove(patron)
+            except:
+                pass
+            warrior.fight.actual_heals -= patron.gun_damage
 
-                    if patron.father.team is team:
-                        patron.father.score -= 400
-                    else:
-                        patron.father.score += 100
-                    try:
-                        Patron.patrons.remove(patron)
-                    except:
-                        pass
-                    warrior.actual_heals -= patron.gun_damage
-                    warrior.score -= 50
-                    continue
+            if warrior.fight.actual_heals <= 0:
+                try:
+                    Warrior.warriors.remove(warrior)
+                except:
+                    pass
 
         patron.calculate_replace_position()
         patron.get_data_for_draw().draw()
         if patron.distance > patron.fly_distance:
             try:
-                patron.father.score -= 1
                 Patron.patrons.remove(patron)
             except:
                 pass
