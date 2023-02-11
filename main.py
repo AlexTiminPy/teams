@@ -9,7 +9,7 @@ import pickle
 import warnings
 
 from collections import namedtuple
-# from numba import njit
+from numba import njit
 
 warnings.filterwarnings(action='ignore', category=UserWarning)
 
@@ -18,13 +18,13 @@ pygame.init()
 
 def get_models():
     with open('modelsSave/rotate_model.pkl', 'rb') as f:
-        clf_rotate = pickle.load(f)
+        clf_rotate = pickle.load(file=f)
 
     with open('modelsSave/move_model.pkl', 'rb') as f:
-        clf_move = pickle.load(f)
+        clf_move = pickle.load(file=f)
 
     with open('modelsSave/reload_pass_fire_model.pkl', 'rb') as f:
-        clf_reload_pass_fire = pickle.load(f)
+        clf_reload_pass_fire = pickle.load(file=f)
 
     return clf_rotate, clf_move, clf_reload_pass_fire
 
@@ -276,7 +276,9 @@ class DecisionMakingWarriors:
 
             min_distance = min(min_distance, distance)
 
-            enemy_on_left, enemy_on_right = DecisionMakingWarriors.get_left_right_enemy(warrior, enemy, enemy_on_left, enemy_on_right)
+            if enemy.team is not warrior.team:
+
+                enemy_on_left, enemy_on_right = DecisionMakingWarriors.get_left_right_enemy(warrior, enemy, enemy_on_left, enemy_on_right)
 
             look_at_enemy, look_at_friend = DecisionMakingWarriors.get_is_look_on(warrior, enemy)
 
@@ -297,7 +299,7 @@ class DecisionMakingWarriors:
         look_at_enemy = 0
         look_at_friend = 0
 
-        if not Collision.collision_segment_and_circle(
+        if not collision_segment_and_circle(
                 enemy.external.x, enemy.external.y, enemy.external.radius,
                 warrior.external.x, warrior.external.y,
                 warrior.external.x + math.cos(math.radians(warrior.fight.actual_angle)) * warrior.fight.watch_distance,
@@ -359,44 +361,43 @@ class DecisionMakingWarriors:
         return rotate, move, reload_pass_fire
 
 
-class Collision:
-    @staticmethod
-    def collision_segment_and_segment(ax1, ay1, ax2, ay2,
-                                      bx1, by1, bx2, by2):
-        v1 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1)
-        v2 = (bx2 - bx1) * (ay2 - by1) - (by2 - by1) * (ax2 - bx1)
-        v3 = (ax2 - ax1) * (by1 - ay1) - (ay2 - ay1) * (bx1 - ax1)
-        v4 = (ax2 - ax1) * (by2 - ay1) - (ay2 - ay1) * (bx2 - ax1)
-        if (v1 * v2 < 0) and (v3 * v4 < 0):
-            return True
-        else:
-            return False
+@njit
+def collision_segment_and_segment(ax1, ay1, ax2, ay2,
+                                  bx1, by1, bx2, by2):
+    v1 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1)
+    v2 = (bx2 - bx1) * (ay2 - by1) - (by2 - by1) * (ax2 - bx1)
+    v3 = (ax2 - ax1) * (by1 - ay1) - (ay2 - ay1) * (bx1 - ax1)
+    v4 = (ax2 - ax1) * (by2 - ay1) - (ay2 - ay1) * (bx2 - ax1)
+    if (v1 * v2 < 0) and (v3 * v4 < 0):
+        return True
+    else:
+        return False
 
 
-    @staticmethod
-    def collision_segment_and_circle(x, y, radius,
-                                     x1, y1,
-                                     x2, y2):
-        if abs(math.hypot(x - x1, y - y1)) > abs(math.hypot(x2 - x1, y2 - y1)):
-            return False
+@njit
+def collision_segment_and_circle(x, y, radius,
+                                 x1, y1,
+                                 x2, y2):
+    if abs(math.hypot(x - x1, y - y1)) > abs(math.hypot(x2 - x1, y2 - y1)):
+        return False
 
-        try:
-            point = numpy.linalg.solve(numpy.array([[y2 - y1, x1 - x2],
-                                                    [x1 - x2, y1 - y2]]),
-                                       numpy.array([(x2 - x1) * -y1 - (y2 - y1) * -x1,
-                                                    (y2 - y1) * -y - (x2 - x1) * x]))
-        except numpy.linalg.LinAlgError:
-            return False
+    try:
+        point = numpy.linalg.solve(numpy.array([[y2 - y1, x1 - x2],
+                                                [x1 - x2, y1 - y2]]),
+                                   numpy.array([(x2 - x1) * -y1 - (y2 - y1) * -x1,
+                                                (y2 - y1) * -y - (x2 - x1) * x]))
+    except:
+        return False
 
-        distance = math.hypot(point[0] - x, point[1] - y)
+    distance = math.hypot(point[0] - x, point[1] - y)
 
-        if max(x1, x2) >= point[0] >= min(x1, x2) and \
-                max(y1, y2) >= point[1] >= min(y1, y2):
+    if max(x1, x2) >= point[0] >= min(x1, x2) and \
+            max(y1, y2) >= point[1] >= min(y1, y2):
 
-            return distance <= radius
+        return distance <= radius
 
-        else:
-            return False
+    else:
+        return False
 
 
 WIDTH, HEIGHT = 1800, 900
@@ -483,10 +484,10 @@ while True:
 
         for warrior in Warrior.warriors:
 
-            if not Collision.collision_segment_and_circle(warrior.external.x, warrior.external.y, warrior.external.radius,
-                                                          patron.x, patron.y,
-                                                          patron.x + patron.dx * patron.speed,
-                                                          patron.y + patron.dy * patron.speed):
+            if not collision_segment_and_circle(warrior.external.x, warrior.external.y, warrior.external.radius,
+                                                patron.x, patron.y,
+                                                patron.x + patron.dx * patron.speed,
+                                                patron.y + patron.dy * patron.speed):
                 continue
 
             try:
