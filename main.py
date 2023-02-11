@@ -1,4 +1,5 @@
 import copy
+import itertools
 import math
 import random
 import sys
@@ -95,7 +96,7 @@ class Patron:
     patrons = []
 
     def __init__(self, x: float, y: float, dx: float, dy: float, gun_damage: int,
-                 fly_distance: float = 500, radius: int = 1, speed: int = 20, color: Color = Color.BLACK
+                 fly_distance: float = 1500, radius: int = 1, speed: int = 200, color: Color = Color.BLACK
                  ):
         self.x = x
         self.y = y
@@ -109,6 +110,8 @@ class Patron:
 
         self.radius = radius
         self.color = color
+
+        self.is_alife = True
 
         Patron.patrons.append(self)
 
@@ -146,8 +149,16 @@ class ExternalPartWarrior:
         self.radius = radius
         self.color = color
 
+        self.circle = Circle(self.color, x, y, self.radius)
+
     def get_data_for_draw(self):
-        return [Circle(self.color, self.x, self.y, self.radius)]
+        return [self.circle]
+
+    def replace(self, dx, dy):
+        self.x += dx
+        self.y += dx
+        self.circle.x += dx
+        self.circle.y += dy
 
 
 class InternalPartWarrior:
@@ -159,7 +170,7 @@ class InternalPartWarrior:
 
 class FightPartWarrior:
     def __init__(self, patrons_count: int = 500, heals: int = 1, speed: float = 0.5, rotation_speed: float = 1,
-                 watch_angle: float = 90, watch_distance: int = 500):
+                 watch_angle: float = 90, watch_distance: int = 1500):
         self.max_patrons_count = patrons_count
         self.actual_patrons_count = patrons_count
         self.max_heals = heals
@@ -210,9 +221,9 @@ class Warrior:
         dx = math.cos(math.radians(self.fight.actual_angle)) * (self.fight.speed * percent_forward)
         dy = math.sin(math.radians(self.fight.actual_angle)) * (self.fight.speed * percent_forward)
         if 0 < self.external.x + dx < WIDTH:
-            self.external.x += dx
+            self.external.replace(dx, 0)
         if 0 < self.external.y + dy < HEIGHT:
-            self.external.y += dy
+            self.external.replace(0, dy)
 
     def fire(self):
 
@@ -277,7 +288,6 @@ class DecisionMakingWarriors:
             min_distance = min(min_distance, distance)
 
             if enemy.team is not warrior.team:
-
                 enemy_on_left, enemy_on_right = DecisionMakingWarriors.get_left_right_enemy(warrior, enemy, enemy_on_left, enemy_on_right)
 
             look_at_enemy, look_at_friend = DecisionMakingWarriors.get_is_look_on(warrior, enemy)
@@ -427,6 +437,23 @@ for i in range(5):
 
 spawn_count = 1
 
+
+def patr(patron):
+    patron.calculate_replace_position()
+    patron.get_data_for_draw().draw()
+
+    if patron.distance > patron.fly_distance:
+        patron.is_alife = False
+
+
+def warr(warrior):
+    warrior.__tick__()
+    DecisionMakingWarriors.calculate_neural_network(warrior, Warrior.warriors)
+
+    for drawable in warrior.get_data_for_draw():
+        drawable.draw()
+
+
 while True:
     pygame.display.set_caption(f"{spawn_count}, {CLOCK.get_fps()}")
 
@@ -451,7 +478,7 @@ while True:
                                 external=ExternalPartWarrior(x=mouse[0] + (25 * i - ((spawn_count - 1) * 25 / 2)),
                                                              y=mouse[1] + (25 * t - ((spawn_count - 1) * 25 / 2)), color=team1.color),
                                 internal=InternalPartWarrior(),
-                                fight=FightPartWarrior())
+                                fight=FightPartWarrior(watch_angle=0))
 
             if event.button == 3:
                 for i in range(spawn_count):
@@ -461,7 +488,7 @@ while True:
                                 external=ExternalPartWarrior(x=mouse[0] + (25 * i - ((spawn_count - 1) * 25 / 2)),
                                                              y=mouse[1] + (25 * t - ((spawn_count - 1) * 25 / 2)), color=team2.color),
                                 internal=InternalPartWarrior(),
-                                fight=FightPartWarrior())
+                                fight=FightPartWarrior(watch_angle=180))
 
             if event.button == 4:
                 spawn_count += 1
@@ -469,48 +496,22 @@ while True:
             if event.button == 5:
                 spawn_count -= 1
 
-    for warrior in Warrior.warriors:
-        warrior.__tick__()
+    for patron, warrior in itertools.product(Patron.patrons, Warrior.warriors):
 
-        DecisionMakingWarriors.calculate_neural_network(warrior, Warrior.warriors)
+        if not collision_segment_and_circle(warrior.external.x, warrior.external.y, warrior.external.radius,
+                                            patron.x, patron.y,
+                                            patron.x + patron.dx * patron.speed,
+                                            patron.y + patron.dy * patron.speed):
+            continue
 
-        for drawable in warrior.get_data_for_draw():
-            drawable.draw()
+        warrior.fight.actual_heals -= patron.gun_damage
+        patron.is_alife = False
 
-    i = 0
+    list(map(lambda patron: patr(patron), Patron.patrons))
+    list(map(lambda warrior: warr(warrior), Warrior.warriors))
 
-    while len(Patron.patrons) - 1 > i:
-        patron = Patron.patrons[i]
-
-        for warrior in Warrior.warriors:
-
-            if not collision_segment_and_circle(warrior.external.x, warrior.external.y, warrior.external.radius,
-                                                patron.x, patron.y,
-                                                patron.x + patron.dx * patron.speed,
-                                                patron.y + patron.dy * patron.speed):
-                continue
-
-            try:
-                Patron.patrons.remove(patron)
-            except:
-                pass
-            warrior.fight.actual_heals -= patron.gun_damage
-
-            if warrior.fight.actual_heals <= 0:
-                try:
-                    Warrior.warriors.remove(warrior)
-                except:
-                    pass
-
-        patron.calculate_replace_position()
-        patron.get_data_for_draw().draw()
-        if patron.distance > patron.fly_distance:
-            try:
-                Patron.patrons.remove(patron)
-            except:
-                pass
-        else:
-            i += 1
+    Warrior.warriors = list(filter(lambda warrior: warrior.fight.actual_heals > 0, Warrior.warriors))
+    Patron.patrons = list(filter(lambda patron: patron.is_alife > 0, Patron.patrons))
 
     pygame.draw.circle(win, Color.BLACK, mouse, 50, 5)
 
