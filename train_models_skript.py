@@ -74,6 +74,8 @@ clf_rotate.fit(X, y_rotate.values.ravel())
 clf_move.fit(X, y_move.values.ravel())
 clf_reload_pass_fire.fit(X, y_reload_pass_fire.values.ravel())
 
+print([coef.shape for coef in clf_rotate.coefs_])
+
 import pickle
 
 # save
