@@ -15,12 +15,21 @@ warnings.filterwarnings(action='ignore', category=UserWarning)
 
 pygame.init()
 
+WIDTH, HEIGHT = 1800, 900
+win = pygame.display.set_mode((WIDTH, HEIGHT))
+CLOCK = pygame.time.Clock()
+fps = 120
+
+my_font = pygame.font.SysFont('Comic Sans MS', 15)
+
 with open('modelsSave/gaussModel.pkl', 'rb') as f:
     gaussModel = pickle.load(f)
 
+GRID_STEP = 100
+
 xx0, xx1 = numpy.meshgrid(
-    range(0, 1800, 10),
-    range(0, 900, 100),
+    range(0, WIDTH, GRID_STEP),
+    range(0, HEIGHT, GRID_STEP),
 )
 
 GRID = []
@@ -43,16 +52,20 @@ def get_models():
     return clf_rotate, clf_move, clf_reload_pass_fire
 
 
+clf_rotate, clf_move, clf_reload_pass_fire = get_models()
+
+
 class Color:
     BLACK = (40, 40, 40)
     WHITE = (215, 215, 215)
     RED = (200, 50, 50)
-    GREEN = (50, 200, 50)
-    BLUE = (30, 67, 200)
+    GREEN = (0, 255, 0)
+    BLUE = (0, 0, 255)
     YELLOW = (200, 200, 50)
     GRAY = (125, 125, 125)
     List_color = ["BLUE", 'GREEN', "RED", "YELLOW", 'GRAY']
-    gauss_colors = [(15, 33, 100), (25, 100, 25)]
+    gauss_colors_external = [(100, 100, 255), (150, 255, 150)]
+    gauss_colors_internal = [(50, 50, 200), (50, 200, 50)]
 
     @staticmethod
     def random_color():
@@ -68,6 +81,7 @@ class Circle:
 
     def draw(self):
         pygame.draw.circle(win, self.color, [self.x, self.y], self.radius)
+        pygame.draw.circle(win, Color.BLACK, [self.x, self.y], self.radius + 1, 2)
 
 
 class Sector:
@@ -478,34 +492,6 @@ def collision_segment_and_circle(x, y, radius,
         return False
 
 
-WIDTH, HEIGHT = 1800, 900
-win = pygame.display.set_mode((WIDTH, HEIGHT))
-CLOCK = pygame.time.Clock()
-fps = 120
-
-my_font = pygame.font.SysFont('Comic Sans MS', 15)
-
-clf_rotate, clf_move, clf_reload_pass_fire = get_models()
-
-team1 = Team("Micky", Color.BLUE, id=0)
-team2 = Team("Goffy", Color.GREEN, id=1)
-# team3 = Team("user", Color.GRAY)
-
-for i in range(5):
-    Warrior(gun=Gun(),
-            team=team1,
-            external=ExternalPartWarrior(x=800, y=100 * i + 100, color=team1.color),
-            internal=InternalPartWarrior(),
-            fight=FightPartWarrior())
-    Warrior(gun=Gun(),
-            team=team2,
-            external=ExternalPartWarrior(x=1000, y=100 * i + 100, color=team2.color),
-            internal=InternalPartWarrior(),
-            fight=FightPartWarrior())
-
-spawn_count = 1
-
-
 class BloodStain:
     stains = []
 
@@ -529,6 +515,10 @@ def patr(patron):
     patron.get_data_for_draw().draw()
 
 
+GRID_STEP = 100
+GRID_INNER = [[[0, 0] for _ in range(0, WIDTH, GRID_STEP)] for _ in range(0, HEIGHT, GRID_STEP)]
+
+
 def warr(warrior):
     warrior.__tick__()
     DecisionMakingWarriors.calculate_neural_network(warrior, Warrior.warriors)
@@ -544,7 +534,29 @@ def warr(warrior):
 
 dataset = []
 
+team1 = Team("Micky", Color.BLUE, id=0)
+team2 = Team("Goffy", Color.GREEN, id=1)
+# team3 = Team("user", Color.GRAY)
+
+IS_MAP_CLASSIFICATE = True
+IS_BLOODSTAIN_DRAW = True
+
+for i in range(5):
+    Warrior(gun=Gun(),
+            team=team1,
+            external=ExternalPartWarrior(x=800, y=100 * i + 100, color=team1.color),
+            internal=InternalPartWarrior(),
+            fight=FightPartWarrior())
+    Warrior(gun=Gun(),
+            team=team2,
+            external=ExternalPartWarrior(x=1000, y=100 * i + 100, color=team2.color),
+            internal=InternalPartWarrior(),
+            fight=FightPartWarrior())
+
+spawn_count = 1
+
 while True:
+
     pygame.display.set_caption(f"{spawn_count}, {len(Warrior.warriors)}, {CLOCK.get_fps()}, {CLOCK.get_time()}")
     # pygame.display.set_caption(f"{user_warrior.fight.actual_patrons_count}, {user_warrior.gun.actual_patron_count}")
     # pygame.display.set_caption(f"{min([warrior.fight.actual_patrons_count for warrior in Warrior.warriors])}")
@@ -556,11 +568,15 @@ while True:
     click = pygame.mouse.get_pressed()
     key = pygame.key.get_pressed()
 
-    gaussModel.fit([[warrior.external.x, warrior.external.y] for warrior in Warrior.warriors], [warrior.team.id for warrior in Warrior.warriors])
-    predict = gaussModel.predict(GRID)
+    if IS_MAP_CLASSIFICATE:
 
-    for grid, class_ in zip(GRID, predict):
-        pygame.draw.rect(win, Color.gauss_colors[class_], grid + [100, 100])
+        if Warrior.warriors:
+
+            gaussModel.fit([[warrior.external.x, warrior.external.y] for warrior in Warrior.warriors], [warrior.team.id for warrior in Warrior.warriors])
+            predict = gaussModel.predict(GRID)
+
+            for grid, class_ in zip(GRID, predict):
+                pygame.draw.rect(win, Color.gauss_colors_external[class_], grid + [100, 100])
 
     if len(Warrior.warriors) < 50:
         Warrior(gun=Gun(),
@@ -594,6 +610,18 @@ while True:
 
             if event.key == pygame.K_SPACE:
                 Warrior.warriors = []
+
+            if event.key == pygame.K_m:
+                if not IS_MAP_CLASSIFICATE:
+                    IS_MAP_CLASSIFICATE = True
+                else:
+                    IS_MAP_CLASSIFICATE = False
+
+            if event.key == pygame.K_b:
+                if not IS_BLOODSTAIN_DRAW:
+                    IS_BLOODSTAIN_DRAW = True
+                else:
+                    IS_BLOODSTAIN_DRAW = False
 
         if event.type == pygame.MOUSEBUTTONDOWN:
 
@@ -632,7 +660,25 @@ while True:
     # user_warrior.fight.actual_angle = math.degrees(math.atan2(mouse[1] - user_warrior.external.y, mouse[0] - user_warrior.external.x))
     # DecisionMakingWarriors.get_start_data(user_warrior, Warrior.warriors, True)
 
-    # BloodStain.draw()
+    if IS_BLOODSTAIN_DRAW:
+        BloodStain.draw()
+
+    if IS_MAP_CLASSIFICATE:
+        GRID_INNER = [[[0, 0] for _ in range(0, WIDTH, GRID_STEP)] for _ in range(0, HEIGHT, GRID_STEP)]
+
+        for warrior in Warrior.warriors:
+            GRID_INNER[int(warrior.external.y // GRID_STEP)][int(warrior.external.x // GRID_STEP)][warrior.team.id] += 1
+
+        for i, val in enumerate(GRID_INNER):
+            for t, val_2 in enumerate(val):
+                color = None
+                if val_2[0] > val_2[1]:
+                    color = Color.gauss_colors_internal[0]
+                elif val_2[0] < val_2[1]:
+                    color = Color.gauss_colors_internal[1]
+                else:
+                    continue
+                pygame.draw.rect(win, color, [t * GRID_STEP, i * GRID_STEP] + [GRID_STEP, GRID_STEP])
 
     list(map(lambda warrior: warr(warrior), Warrior.warriors))
 
@@ -660,7 +706,7 @@ while True:
             Patron.patrons.remove(patron)
 
             if warrior.fight.actual_heals <= 0:
-                # BloodStain(warrior.external.x, warrior.external.y, random.randint(1, 3))
+                BloodStain(warrior.external.x, warrior.external.y, random.randint(1, 3))
                 Warrior.warriors.remove(warrior)
 
             warrior_counter += 1
