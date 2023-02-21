@@ -2,6 +2,7 @@ import copy
 import math
 import random
 import sys
+import time
 
 import numpy
 import pygame
@@ -37,6 +38,26 @@ GRID = []
 for i in zip(xx0, xx1):
     for t in zip(i[0], i[1]):
         GRID.append(list(t))
+
+timestamp = {
+    "map classificate": [],
+    "draw bloodstain": [],
+    "draw map classificate": [],
+
+    "calculate neural network": [],
+    "   calculate neural network start_data": [],
+    "     calculate neural network start_data angle filter": [],
+    "     calculate neural network start_data sorted": [],
+    "     calculate neural network start_data get_is_look_on": [],
+    "     calculate neural network start_data min_distance": [],
+    "     calculate neural network start_data get_easy_data": [],
+
+    "   calculate neural network get_predicts": [],
+    "   calculate neural network activate": [],
+
+    "warr": [],
+    "patrons work": [],
+}
 
 
 def get_models():
@@ -158,7 +179,7 @@ class Patron:
 
 
 class Gun:
-    def __init__(self, patron_count: int = 15, clip_cooldown: float = 360, patron_cooldown: int = 20,
+    def __init__(self, patron_count: int = 15, clip_cooldown: float = 60, patron_cooldown: int = 20,
                  patron_speed: int = 500, spread: float = 4, fire_distance: float = 500, damage: int = 5):
         self.max_patron_count = patron_count
         self.actual_patron_count = patron_count
@@ -197,13 +218,6 @@ class ExternalPartWarrior:
         self.circle.y += dy
 
 
-class InternalPartWarrior:
-    def __init__(self):
-        self.rotate_model = DecisionMakingWarriors.mutate(clf_rotate)
-        self.move_model = DecisionMakingWarriors.mutate(clf_move)
-        self.reload_pass_fire_model = DecisionMakingWarriors.mutate(clf_reload_pass_fire)
-
-
 class FightPartWarrior:
     def __init__(self, patrons_count: int = 5000, heals: int = 1, speed: float = 0.5, rotation_speed: float = 1,
                  watch_angle: float = 90, watch_distance: int = 1500):
@@ -229,13 +243,12 @@ class Team:
 class Warrior:
     warriors = []
 
-    def __init__(self, gun: Gun, team: Team, external: ExternalPartWarrior, internal: InternalPartWarrior, fight: FightPartWarrior):
+    def __init__(self, gun: Gun, team: Team, external: ExternalPartWarrior, fight: FightPartWarrior):
         self.gun = gun
 
         self.team = team
 
         self.external = external
-        self.internal = internal
         self.fight = fight
 
         Warrior.warriors.append(self)
@@ -297,53 +310,55 @@ class Warrior:
 
 class DecisionMakingWarriors:
     @staticmethod
-    def mutate(model):
-        new_model = copy.deepcopy(model)
-        for cf in new_model.coefs_:
-            for i in range(len(cf)):
-                for t in range(len(cf[i])):
-                    cf[i][t] += random.uniform(-0.01, 0.01)
+    def calculate_neural_network(all_warriors):
 
-        return new_model
+        start = time.time()
+
+        start_data = [DecisionMakingWarriors.get_start_data(warrior, all_warriors)[0] for warrior in all_warriors]
+
+        timestamp["   calculate neural network start_data"].append(time.time() - start)
+
+        start = time.time()
+        rotate, move, reload_pass_fire = DecisionMakingWarriors.get_predicts(start_data)
+
+        timestamp["   calculate neural network get_predicts"].append(time.time() - start)
+
+        start = time.time()
+
+        for num, warrior in enumerate(all_warriors):
+            DecisionMakingWarriors.activate(warrior, rotate[num], move[num], reload_pass_fire[num])
+
+        timestamp["   calculate neural network activate"].append(time.time() - start)
+
+        # list(map(lambda warrior: DecisionMakingWarriors.activate(warrior, rotate[num], move[num], reload_pass_fire[num]), all_warriors))
 
     @staticmethod
-    def calculate_neural_network(warrior, all_possibles_enemy):
-        start_data = DecisionMakingWarriors.get_start_data(warrior, all_possibles_enemy)
-        rotate, move, reload_pass_fire = DecisionMakingWarriors.get_predicts(warrior, start_data)
-        DecisionMakingWarriors.activate(warrior, rotate, move, reload_pass_fire)
-
-    @staticmethod
-    def get_start_data(warrior, all_possibles_enemy, is_print=False):
+    def get_start_data(warrior, all_possibles_enemy):
         look_at_friend = 0
         look_at_enemy = 0
 
         enemy_on_left = 0
         enemy_on_right = 0
 
-        if is_print:
-            print(len(all_possibles_enemy))
+        start_ = time.time()
 
         filtered_to_angles_enemies = list(filter(lambda enemy: abs(DecisionMakingWarriors.get_angle(warrior, enemy)) < 45, all_possibles_enemy))
-        if is_print:
-            print(len(filtered_to_angles_enemies))
 
         without_left = list(filter(lambda enemy: not -45 < DecisionMakingWarriors.get_angle(warrior, enemy) < -5 and enemy.team is not warrior.team, filtered_to_angles_enemies))
         if len(without_left) < len(filtered_to_angles_enemies):
             enemy_on_right = True
-        if is_print:
-            print(len(without_left))
 
         without_right = list(filter(lambda enemy: not 45 > DecisionMakingWarriors.get_angle(warrior, enemy) > 5 and enemy.team is not warrior.team, without_left))
         if len(without_right) < len(without_left):
             enemy_on_left = True
-        if is_print:
-            print(len(without_right))
+
+        timestamp["     calculate neural network start_data angle filter"].append(time.time() - start_)
 
         sorted_to_distance_enemies = sorted(without_right, key=lambda enemy: abs(math.hypot(enemy.external.x - warrior.external.x, enemy.external.y - warrior.external.y)))
-        if is_print:
-            print("-" * 10)
 
-        for enemy in sorted_to_distance_enemies:
+        start_ = time.time()
+
+        for enemy in without_right:
 
             if enemy is warrior:
                 continue
@@ -353,25 +368,29 @@ class DecisionMakingWarriors:
             if look_at_enemy == 1 or look_at_friend == 1:
                 break
 
-        if sorted_to_distance_enemies:
-            min_distance = abs(math.hypot(sorted_to_distance_enemies[0].external.x - warrior.external.x, sorted_to_distance_enemies[0].external.y - warrior.external.y))
+        timestamp["     calculate neural network start_data get_is_look_on"].append(time.time() - start_)
+
+        start_ = time.time()
+
+        if without_right:
+            min_distance = abs(math.hypot(without_right[0].external.x - warrior.external.x, without_right[0].external.y - warrior.external.y))
         else:
             min_distance = 0
 
-        if is_print:
-            print(look_at_enemy,
-                  look_at_friend,
-                  int(bool(enemy_on_left)),
-                  int(bool(enemy_on_right)))
+        timestamp["     calculate neural network start_data min_distance"].append(time.time() - start_)
 
-        return [
-            DecisionMakingWarriors.get_easy_data(warrior, min_distance) +
-            [
-                look_at_enemy,
-                look_at_friend,
-                int(bool(enemy_on_left)),
-                int(bool(enemy_on_right))
-            ]]
+        start_ = time.time()
+        easy_data = DecisionMakingWarriors.get_easy_data(warrior, min_distance)
+        timestamp["     calculate neural network start_data get_easy_data"].append(time.time() - start_)
+
+        return [easy_data
+                +
+                [
+                    look_at_enemy,
+                    look_at_friend,
+                    int(bool(enemy_on_left)),
+                    int(bool(enemy_on_right))
+                ]]
 
     @staticmethod
     def get_is_look_on(warrior, enemy):
@@ -432,9 +451,9 @@ class DecisionMakingWarriors:
     @staticmethod
     def activate(warrior, rotate, move, reload_pass_fire):
 
-        warrior.rotate(rotate[0])
+        warrior.rotate(rotate)
 
-        warrior.went(move[0])
+        warrior.went(move)
 
         if reload_pass_fire < 0:
             warrior.reload()
@@ -442,10 +461,10 @@ class DecisionMakingWarriors:
             warrior.fire()
 
     @staticmethod
-    def get_predicts(warrior, start_data):
-        rotate = warrior.internal.rotate_model.predict(start_data)
-        move = warrior.internal.move_model.predict(start_data)
-        reload_pass_fire = warrior.internal.reload_pass_fire_model.predict(start_data)
+    def get_predicts(start_data):
+        rotate = clf_rotate.predict(start_data)
+        move = clf_move.predict(start_data)
+        reload_pass_fire = clf_reload_pass_fire.predict(start_data)
 
         return rotate, move, reload_pass_fire
 
@@ -494,22 +513,38 @@ def collision_segment_and_circle(x, y, radius,
 
 class BloodStain:
     stains = []
+    r = 150
+    g = 0
+    b = 0
 
     def __init__(self, x, y, r):
-        BloodStain.stains.append([x, y, r])
+        BloodStain.stains.append([x, y, r, False, 1])
 
     @staticmethod
     def draw():
-        for i in BloodStain.stains:
-            if i[-1] <= 8:
-                i[-1] += 0.1
-            pygame.draw.circle(win, (150, 0, 0), i[0:2], i[-1])
+        stain_counter = 0
+        while stain_counter < len(BloodStain.stains):
+            stain = BloodStain.stains[stain_counter]
+            pygame.draw.circle(win, [BloodStain.r * stain[4], BloodStain.g, BloodStain.b], stain[0:2], stain[2])
+
+            if not stain[3]:
+                stain[2] += 0.1
+            else:
+                stain[4] -= 0.01
+
+            if stain[2] >= 8:
+                stain[3] = True
+
+            if stain[4] <= 0:
+                BloodStain.stains.remove(stain)
+            else:
+                stain_counter += 1
 
 
 def patr(patron):
     patron.calculate_replace_position()
 
-    if patron.distance > patron.fly_distance:
+    if patron.angle > patron.fly_distance:
         patron.is_alife = False
 
     patron.get_data_for_draw().draw()
@@ -521,7 +556,6 @@ GRID_INNER = [[[0, 0] for _ in range(0, WIDTH, GRID_STEP)] for _ in range(0, HEI
 
 def warr(warrior):
     warrior.__tick__()
-    DecisionMakingWarriors.calculate_neural_network(warrior, Warrior.warriors)
     for drawable in warrior.get_data_for_draw():
         drawable.draw()
 
@@ -545,12 +579,10 @@ for i in range(5):
     Warrior(gun=Gun(),
             team=team1,
             external=ExternalPartWarrior(x=800, y=100 * i + 100, color=team1.color),
-            internal=InternalPartWarrior(),
             fight=FightPartWarrior())
     Warrior(gun=Gun(),
             team=team2,
             external=ExternalPartWarrior(x=1000, y=100 * i + 100, color=team2.color),
-            internal=InternalPartWarrior(),
             fight=FightPartWarrior())
 
 spawn_count = 1
@@ -568,6 +600,8 @@ while True:
     click = pygame.mouse.get_pressed()
     key = pygame.key.get_pressed()
 
+    start = time.time()
+
     if IS_MAP_CLASSIFICATE:
 
         if Warrior.warriors:
@@ -578,17 +612,17 @@ while True:
             for grid, class_ in zip(GRID, predict):
                 pygame.draw.rect(win, Color.gauss_colors_external[class_], grid + [100, 100])
 
+    timestamp["map classificate"].append(time.time() - start)
+
     if len(Warrior.warriors) < 50:
         Warrior(gun=Gun(),
                 team=team1,
                 external=ExternalPartWarrior(x=random.randint(600, 800), y=random.randint(100, 800), color=team1.color),
-                internal=InternalPartWarrior(),
                 fight=FightPartWarrior(watch_angle=180))
 
         Warrior(gun=Gun(),
                 team=team2,
                 external=ExternalPartWarrior(x=random.randint(1000, 1200), y=random.randint(100, 800), color=team2.color),
-                internal=InternalPartWarrior(),
                 fight=FightPartWarrior(watch_angle=0))
 
     # if key[pygame.K_w]:
@@ -600,12 +634,14 @@ while True:
     for event in pygame.event.get():
 
         if event.type == pygame.QUIT:
-            print(dataset)
+            for key, value in timestamp.items():
+                print(f"{numpy.mean(value):.20f}  {key}")
             sys.exit()
 
         if event.type == pygame.KEYUP:
             if event.key == pygame.K_ESCAPE:
-                print(dataset)
+                for key, value in timestamp.items():
+                    print(f"{numpy.mean(value):.20f}  {key}")
                 sys.exit()
 
             if event.key == pygame.K_SPACE:
@@ -632,7 +668,6 @@ while True:
                                 team=team1,
                                 external=ExternalPartWarrior(x=mouse[0] + (25 * i - ((spawn_count - 1) * 25 / 2)),
                                                              y=mouse[1] + (25 * t - ((spawn_count - 1) * 25 / 2)), color=team1.color),
-                                internal=InternalPartWarrior(),
                                 fight=FightPartWarrior(watch_angle=0))
 
             if event.button == 3:
@@ -642,7 +677,6 @@ while True:
                                 team=team2,
                                 external=ExternalPartWarrior(x=mouse[0] + (25 * i - ((spawn_count - 1) * 25 / 2)),
                                                              y=mouse[1] + (25 * t - ((spawn_count - 1) * 25 / 2)), color=team2.color),
-                                internal=InternalPartWarrior(),
                                 fight=FightPartWarrior(watch_angle=180))
 
             # if event.button == 1:
@@ -660,8 +694,14 @@ while True:
     # user_warrior.fight.actual_angle = math.degrees(math.atan2(mouse[1] - user_warrior.external.y, mouse[0] - user_warrior.external.x))
     # DecisionMakingWarriors.get_start_data(user_warrior, Warrior.warriors, True)
 
+    start = time.time()
+
     if IS_BLOODSTAIN_DRAW:
         BloodStain.draw()
+
+    timestamp["draw bloodstain"].append(time.time() - start)
+
+    start = time.time()
 
     if IS_MAP_CLASSIFICATE:
         GRID_INNER = [[[0, 0] for _ in range(0, WIDTH, GRID_STEP)] for _ in range(0, HEIGHT, GRID_STEP)]
@@ -680,7 +720,21 @@ while True:
                     continue
                 pygame.draw.rect(win, color, [t * GRID_STEP, i * GRID_STEP] + [GRID_STEP, GRID_STEP])
 
+    timestamp["draw map classificate"].append(time.time() - start)
+
+    start = time.time()
+
+    DecisionMakingWarriors.calculate_neural_network(Warrior.warriors)
+
+    timestamp["calculate neural network"].append(time.time() - start)
+
+    start = time.time()
+
     list(map(lambda warrior: warr(warrior), Warrior.warriors))
+
+    timestamp["warr"].append(time.time() - start)
+
+    start = time.time()
 
     patron_counter = 0
 
@@ -706,7 +760,8 @@ while True:
             Patron.patrons.remove(patron)
 
             if warrior.fight.actual_heals <= 0:
-                BloodStain(warrior.external.x, warrior.external.y, random.randint(1, 3))
+                if IS_BLOODSTAIN_DRAW:
+                    BloodStain(warrior.external.x, warrior.external.y, random.randint(1, 3))
                 Warrior.warriors.remove(warrior)
 
             warrior_counter += 1
@@ -715,6 +770,8 @@ while True:
 
         patr(patron)
         patron_counter += 1
+
+    timestamp["patrons work"].append(time.time() - start)
 
     # for i in user_warrior.get_data_for_draw():
     #     i.draw()
