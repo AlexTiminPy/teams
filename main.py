@@ -46,11 +46,6 @@ timestamp = {
 
     "calculate neural network": [],
     "   calculate neural network start_data": [],
-    "     calculate neural network start_data angle filter": [],
-    "     calculate neural network start_data sorted": [],
-    "     calculate neural network start_data get_is_look_on": [],
-    "     calculate neural network start_data min_distance": [],
-    "     calculate neural network start_data get_easy_data": [],
 
     "   calculate neural network get_predicts": [],
     "   calculate neural network activate": [],
@@ -71,6 +66,48 @@ def get_models():
         clf_reload_pass_fire = pickle.load(file=f)
 
     return clf_rotate, clf_move, clf_reload_pass_fire
+
+
+@njit
+def collision_segment_and_segment(ax1, ay1, ax2, ay2,
+                                  bx1, by1, bx2, by2):
+    v1 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1)
+    v2 = (bx2 - bx1) * (ay2 - by1) - (by2 - by1) * (ax2 - bx1)
+    v3 = (ax2 - ax1) * (by1 - ay1) - (ay2 - ay1) * (bx1 - ax1)
+    v4 = (ax2 - ax1) * (by2 - ay1) - (ay2 - ay1) * (bx2 - ax1)
+    if (v1 * v2 < 0) and (v3 * v4 < 0):
+        return True
+    else:
+        return False
+
+
+@njit
+def collision_segment_and_circle(x, y, radius,
+                                 x1, y1,
+                                 x2, y2):
+    if abs(math.hypot(x - x1, y - y1)) > abs(math.hypot(x2 - x1, y2 - y1)):
+        return False
+
+    if radius > abs(math.hypot(x - x1, y - y1)):
+        return True
+
+    try:
+        point = numpy.linalg.solve(numpy.array([[y2 - y1, x1 - x2],
+                                                [x1 - x2, y1 - y2]]),
+                                   numpy.array([(x2 - x1) * -y1 - (y2 - y1) * -x1,
+                                                (y2 - y1) * -y - (x2 - x1) * x]))
+    except:
+        return False
+
+    distance = math.hypot(point[0] - x, point[1] - y)
+
+    if max(x1, x2) >= point[0] >= min(x1, x2) and \
+            max(y1, y2) >= point[1] >= min(y1, y2):
+
+        return distance <= radius
+
+    else:
+        return False
 
 
 clf_rotate, clf_move, clf_reload_pass_fire = get_models()
@@ -180,7 +217,7 @@ class Patron:
 
 class Gun:
     def __init__(self, patron_count: int = 15, clip_cooldown: float = 60, patron_cooldown: int = 20,
-                 patron_speed: int = 500, spread: float = 4, fire_distance: float = 500, damage: int = 5):
+                 patron_speed: int = 500, spread: float = 4, fire_distance: float = 1500, damage: int = 5):
         self.max_patron_count = patron_count
         self.actual_patron_count = patron_count
         self.fire_speed = clip_cooldown
@@ -288,8 +325,8 @@ class Warrior:
 
         self.gun.actual_patron_count -= 1
 
-        Patron(x=self.external.x + (math.cos(math.radians(self.fight.actual_angle)) * self.external.radius),
-               y=self.external.y + (math.sin(math.radians(self.fight.actual_angle)) * self.external.radius),
+        Patron(x=self.external.x + (math.cos(math.radians(self.fight.actual_angle)) * (self.external.radius + 2)),
+               y=self.external.y + (math.sin(math.radians(self.fight.actual_angle)) * (self.external.radius + 2)),
                dx=math.cos(math.radians(self.fight.actual_angle)),
                dy=math.sin(math.radians(self.fight.actual_angle)),
                gun_damage=self.gun.damage,
@@ -304,7 +341,7 @@ class Warrior:
             return
 
         self.gun.actual_clip_cooldown = 0
-        self.gun.actual_patron_count += min(self.gun.max_patron_count, self.fight.actual_patrons_count)
+        self.gun.actual_patron_count = min(self.gun.max_patron_count, self.fight.actual_patrons_count)
         self.fight.actual_patrons_count -= min(self.gun.max_patron_count, self.fight.actual_patrons_count)
 
 
@@ -340,48 +377,94 @@ class DecisionMakingWarriors:
         enemy_on_left = 0
         enemy_on_right = 0
 
-        start_ = time.time()
+        # filtered_to_distance = filter(lambda x:
+        #                               math.hypot(warrior.external.x - x.external.x,
+        #                                          warrior.external.y - x.external.y) < warrior.fight.watch_distance, all_possibles_enemy)
 
-        filtered_to_angles_enemies = list(filter(lambda enemy: abs(DecisionMakingWarriors.get_angle(warrior, enemy)) < 45, all_possibles_enemy))
+        # filtered_to_distance = [enemy for enemy in all_possibles_enemy if math.hypot(warrior.external.x - enemy.external.x,
+        #                                                                              warrior.external.y - enemy.external.y) < warrior.fight.watch_distance]
 
-        without_left = list(filter(lambda enemy: not -45 < DecisionMakingWarriors.get_angle(warrior, enemy) < -5 and enemy.team is not warrior.team, filtered_to_angles_enemies))
-        if len(without_left) < len(filtered_to_angles_enemies):
-            enemy_on_right = True
+        sorted_to_angle_enemies = sorted(all_possibles_enemy,
+                                         key=lambda x: math.degrees(math.atan2(x.external.y - warrior.external.y,
+                                                                               x.external.x - warrior.external.x)))
 
-        without_right = list(filter(lambda enemy: not 45 > DecisionMakingWarriors.get_angle(warrior, enemy) > 5 and enemy.team is not warrior.team, without_left))
-        if len(without_right) < len(without_left):
-            enemy_on_left = True
+        L = 0
+        R = len(sorted_to_angle_enemies) - 1
 
-        timestamp["     calculate neural network start_data angle filter"].append(time.time() - start_)
+        act = int((R + L) // 2)
 
-        sorted_to_distance_enemies = sorted(without_right, key=lambda enemy: abs(math.hypot(enemy.external.x - warrior.external.x, enemy.external.y - warrior.external.y)))
+        min_distance = 0
 
-        start_ = time.time()
+        cycles = 0
+        max_cycles = 25
 
-        for enemy in without_right:
+        while L < R:
 
-            if enemy is warrior:
-                continue
+            cycles += 1
 
-            look_at_enemy, look_at_friend = DecisionMakingWarriors.get_is_look_on(warrior, enemy)
-
-            if look_at_enemy == 1 or look_at_friend == 1:
+            if cycles > max_cycles:
                 break
 
-        timestamp["     calculate neural network start_data get_is_look_on"].append(time.time() - start_)
+            elem = sorted_to_angle_enemies[act]
 
-        start_ = time.time()
+            angle = math.degrees(math.atan2(elem.external.y - warrior.external.y, elem.external.x - warrior.external.x))
+            angle = (max(angle, angle + 360) - warrior.fight.actual_angle) % 360
 
-        if without_right:
-            min_distance = abs(math.hypot(without_right[0].external.x - warrior.external.x, without_right[0].external.y - warrior.external.y))
-        else:
-            min_distance = 0
+            if 45 > angle > 0:
+                enemy_on_right = 1
 
-        timestamp["     calculate neural network start_data min_distance"].append(time.time() - start_)
+            if 360 > angle > 315:
+                enemy_on_left = 1
 
-        start_ = time.time()
+            if 5 >= angle >= 0:
+                R = act - 1
+                act = int((R + L) // 2)
+
+                if collision_segment_and_circle(elem.external.x, elem.external.y, elem.external.radius,
+                                                warrior.external.x, warrior.external.y,
+                                                warrior.external.x + (math.cos(math.radians(warrior.fight.actual_angle)) * warrior.fight.watch_distance),
+                                                warrior.external.y + (math.sin(math.radians(warrior.fight.actual_angle)) * warrior.fight.watch_distance)):
+
+                    # pygame.draw.circle(win, Color.BLACK, [elem.external.x, elem.external.y], 10, 5)
+
+                    min_distance = math.hypot(warrior.external.x - elem.external.x, warrior.external.y - elem.external.y)
+
+                    if warrior.team is not elem.team:
+                        look_at_enemy = 1
+                        look_at_friend = 0
+                    else:
+                        look_at_enemy = 0
+                        look_at_friend = 1
+
+            elif 360 >= angle >= 355:
+                L = act + 1
+                act = int((R + L) // 2)
+
+                if collision_segment_and_circle(elem.external.x, elem.external.y, elem.external.radius,
+                                                warrior.external.x, warrior.external.y,
+                                                warrior.external.x + (math.cos(math.radians(warrior.fight.actual_angle)) * warrior.fight.watch_distance),
+                                                warrior.external.y + (math.sin(math.radians(warrior.fight.actual_angle)) * warrior.fight.watch_distance)):
+
+                    # pygame.draw.circle(win, Color.BLACK, [elem.external.x, elem.external.y], 10, 5)
+
+                    min_distance = math.hypot(warrior.external.x - elem.external.x, warrior.external.y - elem.external.y)
+
+                    if warrior.team is not elem.team:
+                        look_at_enemy = 1
+                        look_at_friend = 0
+                    else:
+                        look_at_enemy = 0
+                        look_at_friend = 1
+
+            elif angle > 180:
+                L = act + 1
+                act = int((R + L) // 2) + 1
+
+            elif angle < 180:
+                R = act - 1
+                act = int((R + L) // 2)
+
         easy_data = DecisionMakingWarriors.get_easy_data(warrior, min_distance)
-        timestamp["     calculate neural network start_data get_easy_data"].append(time.time() - start_)
 
         return [easy_data
                 +
@@ -469,48 +552,6 @@ class DecisionMakingWarriors:
         return rotate, move, reload_pass_fire
 
 
-@njit
-def collision_segment_and_segment(ax1, ay1, ax2, ay2,
-                                  bx1, by1, bx2, by2):
-    v1 = (bx2 - bx1) * (ay1 - by1) - (by2 - by1) * (ax1 - bx1)
-    v2 = (bx2 - bx1) * (ay2 - by1) - (by2 - by1) * (ax2 - bx1)
-    v3 = (ax2 - ax1) * (by1 - ay1) - (ay2 - ay1) * (bx1 - ax1)
-    v4 = (ax2 - ax1) * (by2 - ay1) - (ay2 - ay1) * (bx2 - ax1)
-    if (v1 * v2 < 0) and (v3 * v4 < 0):
-        return True
-    else:
-        return False
-
-
-@njit
-def collision_segment_and_circle(x, y, radius,
-                                 x1, y1,
-                                 x2, y2):
-    if abs(math.hypot(x - x1, y - y1)) > abs(math.hypot(x2 - x1, y2 - y1)):
-        return False
-
-    if radius > abs(math.hypot(x - x1, y - y1)):
-        return True
-
-    try:
-        point = numpy.linalg.solve(numpy.array([[y2 - y1, x1 - x2],
-                                                [x1 - x2, y1 - y2]]),
-                                   numpy.array([(x2 - x1) * -y1 - (y2 - y1) * -x1,
-                                                (y2 - y1) * -y - (x2 - x1) * x]))
-    except:
-        return False
-
-    distance = math.hypot(point[0] - x, point[1] - y)
-
-    if max(x1, x2) >= point[0] >= min(x1, x2) and \
-            max(y1, y2) >= point[1] >= min(y1, y2):
-
-        return distance <= radius
-
-    else:
-        return False
-
-
 class BloodStain:
     stains = []
     r = 150
@@ -544,7 +585,7 @@ class BloodStain:
 def patr(patron):
     patron.calculate_replace_position()
 
-    if patron.angle > patron.fly_distance:
+    if patron.distance > patron.fly_distance:
         patron.is_alife = False
 
     patron.get_data_for_draw().draw()
@@ -560,34 +601,44 @@ def warr(warrior):
         drawable.draw()
 
 
-# user_warrior = Warrior(gun=Gun(),
-#                        team=team3,
-#                        external=ExternalPartWarrior(x=450, y=200, color=team3.color),
-#                        internal=InternalPartWarrior(),
-#                        fight=FightPartWarrior(watch_angle=0))
-
 dataset = []
 
 team1 = Team("Micky", Color.BLUE, id=0)
 team2 = Team("Goffy", Color.GREEN, id=1)
-# team3 = Team("user", Color.GRAY)
+team3 = Team("user", Color.GRAY, id=2)
 
-IS_MAP_CLASSIFICATE = True
-IS_BLOODSTAIN_DRAW = True
+# user_warrior = Warrior(gun=Gun(),
+#                        team=team3,
+#                        external=ExternalPartWarrior(x=450, y=200, color=team3.color),
+#                        fight=FightPartWarrior(watch_angle=0))
+#
+# Warrior.warriors.remove(user_warrior)
 
-for i in range(5):
+
+IS_MAP_CLASSIFICATE = False
+IS_BLOODSTAIN_DRAW = False
+
+for i in range(100):
     Warrior(gun=Gun(),
             team=team1,
-            external=ExternalPartWarrior(x=800, y=100 * i + 100, color=team1.color),
-            fight=FightPartWarrior())
+            external=ExternalPartWarrior(x=random.randint(600, 800), y=random.randint(100, 800), color=team1.color),
+            fight=FightPartWarrior(watch_angle=180))
     Warrior(gun=Gun(),
             team=team2,
-            external=ExternalPartWarrior(x=1000, y=100 * i + 100, color=team2.color),
-            fight=FightPartWarrior())
+            external=ExternalPartWarrior(x=random.randint(1000, 1200), y=random.randint(100, 800), color=team2.color),
+            fight=FightPartWarrior(watch_angle=180))
 
 spawn_count = 1
 
+GLOBAL_ITER_COUNT = -1
+
 while True:
+
+    GLOBAL_ITER_COUNT += 1
+    # if GLOBAL_ITER_COUNT > 100:
+    #     for key, value in timestamp.items():
+    #         print(f"{numpy.mean(value):.20f}  {key}")
+    #     break
 
     pygame.display.set_caption(f"{spawn_count}, {len(Warrior.warriors)}, {CLOCK.get_fps()}, {CLOCK.get_time()}")
     # pygame.display.set_caption(f"{user_warrior.fight.actual_patrons_count}, {user_warrior.gun.actual_patron_count}")
@@ -614,16 +665,17 @@ while True:
 
     timestamp["map classificate"].append(time.time() - start)
 
-    if len(Warrior.warriors) < 50:
-        Warrior(gun=Gun(),
-                team=team1,
-                external=ExternalPartWarrior(x=random.randint(600, 800), y=random.randint(100, 800), color=team1.color),
-                fight=FightPartWarrior(watch_angle=180))
+    if len(Warrior.warriors) < 200:
+        for i in range(0, 200 - len(Warrior.warriors), 2):
+            Warrior(gun=Gun(),
+                    team=team1,
+                    external=ExternalPartWarrior(x=random.randint(600, 800), y=random.randint(100, 800), color=team1.color),
+                    fight=FightPartWarrior(watch_angle=180))
 
-        Warrior(gun=Gun(),
-                team=team2,
-                external=ExternalPartWarrior(x=random.randint(1000, 1200), y=random.randint(100, 800), color=team2.color),
-                fight=FightPartWarrior(watch_angle=0))
+            Warrior(gun=Gun(),
+                    team=team2,
+                    external=ExternalPartWarrior(x=random.randint(1000, 1200), y=random.randint(100, 800), color=team2.color),
+                    fight=FightPartWarrior(watch_angle=0))
 
     # if key[pygame.K_w]:
     #     user_warrior.went(1)
@@ -692,7 +744,6 @@ while True:
                 spawn_count -= 1
 
     # user_warrior.fight.actual_angle = math.degrees(math.atan2(mouse[1] - user_warrior.external.y, mouse[0] - user_warrior.external.x))
-    # DecisionMakingWarriors.get_start_data(user_warrior, Warrior.warriors, True)
 
     start = time.time()
 
@@ -704,7 +755,7 @@ while True:
     start = time.time()
 
     if IS_MAP_CLASSIFICATE:
-        GRID_INNER = [[[0, 0] for _ in range(0, WIDTH, GRID_STEP)] for _ in range(0, HEIGHT, GRID_STEP)]
+        GRID_INNER = [[[0, 0, 0, 0, 0] for _ in range(0, WIDTH, GRID_STEP)] for _ in range(0, HEIGHT, GRID_STEP)]
 
         for warrior in Warrior.warriors:
             GRID_INNER[int(warrior.external.y // GRID_STEP)][int(warrior.external.x // GRID_STEP)][warrior.team.id] += 1
